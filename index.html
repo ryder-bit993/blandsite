@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Python Script Runner</title>
-    <!-- PyScript CSS & JS -->
     <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
     <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
 
@@ -33,10 +32,7 @@
             border-radius: 6px;
             font-size: 14px;
         }
-        select {
-            flex-grow: 1;
-            border: 1px solid #ccc;
-        }
+        select { flex-grow: 1; border: 1px solid #ccc; }
         button {
             background-color: #2da44e;
             color: white;
@@ -44,9 +40,7 @@
             cursor: pointer;
             font-weight: bold;
         }
-        button:hover {
-            background-color: #2c974b;
-        }
+        button:hover { background-color: #2c974b; }
         pre {
             background-color: #1e1e1e;
             color: #d4d4d4;
@@ -57,13 +51,9 @@
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
-            font-family: 'Courier New', Courier, monospace;
+            font-family: monospace;
         }
-        #code-display {
-            background-color: #f4f4f4;
-            color: #333;
-            border: 1px solid #ccc;
-        }
+        #code-display { background-color: #f4f4f4; color: #333; border: 1px solid #ccc; }
     </style>
 </head>
 <body>
@@ -145,35 +135,28 @@
     fetchScriptList();
 </script>
 
-<!-- Python Execution and Output Redirection -->
+<!-- PyScript Execution -->
 <script type="mpy">
 from js import window, document
 import sys
-import asyncio
 
-class TerminalStream:
-    """Custom stdout class that streams text directly to the HTML terminal element."""
-    def __init__(self, element_id):
-        self.element = document.getElementById(element_id)
+def custom_write(text):
+    """Appends printed text directly to the console area."""
+    term = document.getElementById("output-terminal")
+    term.innerText += str(text)
+    term.scrollTop = term.scrollHeight
 
-    def write(self, text):
-        self.element.innerText += text
-        # Keep scroll focused at bottom
-        self.element.scrollTop = self.element.scrollHeight
-
-    def flush(self):
-        pass
+def custom_print(*args, sep=' ', end='\n'):
+    output = sep.join(map(str, args)) + end
+    custom_write(output)
 
 def custom_input(prompt_msg=""):
-    """Handles standard input using a browser popup."""
+    custom_write(prompt_msg)
     result = window.prompt(prompt_msg)
-    # Write user input back to the terminal so it appears in log
-    document.getElementById("output-terminal").innerText += f"{prompt_msg}{result or ''}\n"
-    if result is None:
-        return ""
-    return result
+    custom_write(f"{result or ''}\n")
+    return result if result is not None else ""
 
-async def run_script_async(event):
+def run_script(event):
     output_element = document.getElementById("output-terminal")
     script_code = window.fileContent
     
@@ -182,30 +165,30 @@ async def run_script_async(event):
         return
 
     output_element.innerText = ""
-    
-    # Redirect standard output streams to terminal
-    term_stream = TerminalStream("output-terminal")
-    old_stdout = sys.stdout
-    sys.stdout = term_stream
 
+    # Build execution context with imported modules and custom I/O
     exec_scope = {
+        'sys': sys,
+        'print': custom_print,
         'input': custom_input,
         '__name__': '__main__'
     }
 
+    # Redirect sys.stdout directly in PyScript scope
+    class CustomStdout:
+        def write(self, s):
+            custom_write(s)
+        def flush(self):
+            pass
+
+    sys.stdout = CustomStdout()
+
     try:
-        # Patch time.sleep with asyncio sleep inside execution scope for non-blocking delays
-        time_patch = "import time, asyncio\ntime.sleep = lambda secs: asyncio.sleep(secs)\n"
-        exec(time_patch + script_code, exec_scope)
+        exec(script_code, exec_scope)
     except Exception as e:
         output_element.innerText += f"\nExecution Error:\n{e}"
-    finally:
-        sys.stdout = old_stdout
 
-def on_run_click(event):
-    asyncio.create_task(run_script_async(event))
-
-document.getElementById("run-btn").addEventListener("click", on_run_click)
+document.getElementById("run-btn").addEventListener("click", run_script)
 </script>
 
 </body>
