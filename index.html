@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Python Script Runner</title>
+    <!-- PyScript CSS & JS -->
     <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
     <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
 
@@ -78,8 +79,8 @@
 
 <!-- Fetch files from GitHub REST API -->
 <script>
-    const GITHUB_USERNAME = "ryder-bit993"; 
-    const REPO_NAME = "blandsite";
+    const GITHUB_USERNAME = "your-username"; 
+    const REPO_NAME = "your-repo-name";
     const FOLDER_PATH = "scripts";
 
     const selectElement = document.getElementById("script-select");
@@ -138,22 +139,32 @@
 <!-- PyScript Execution -->
 <script type="mpy">
 from js import window, document
-import sys
 
-def custom_write(text):
-    """Appends printed text directly to the console area."""
+def write_to_terminal(text):
     term = document.getElementById("output-terminal")
     term.innerText += str(text)
     term.scrollTop = term.scrollHeight
 
+class MockStdout:
+    def write(self, s):
+        write_to_terminal(s)
+    def flush(self):
+        pass
+
+class MockSys:
+    def __init__(self):
+        self.stdout = MockStdout()
+    def exit(self, code=0):
+        write_to_terminal("\n[Script ended]")
+
 def custom_print(*args, sep=' ', end='\n'):
     output = sep.join(map(str, args)) + end
-    custom_write(output)
+    write_to_terminal(output)
 
 def custom_input(prompt_msg=""):
-    custom_write(prompt_msg)
+    write_to_terminal(prompt_msg)
     result = window.prompt(prompt_msg)
-    custom_write(f"{result or ''}\n")
+    write_to_terminal(f"{result or ''}\n")
     return result if result is not None else ""
 
 def run_script(event):
@@ -166,22 +177,14 @@ def run_script(event):
 
     output_element.innerText = ""
 
-    # Build execution context with imported modules and custom I/O
+    mock_sys = MockSys()
+
     exec_scope = {
-        'sys': sys,
+        'sys': mock_sys,
         'print': custom_print,
         'input': custom_input,
         '__name__': '__main__'
     }
-
-    # Redirect sys.stdout directly in PyScript scope
-    class CustomStdout:
-        def write(self, s):
-            custom_write(s)
-        def flush(self):
-            pass
-
-    sys.stdout = CustomStdout()
 
     try:
         exec(script_code, exec_scope)
