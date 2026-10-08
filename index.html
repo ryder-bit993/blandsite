@@ -1,31 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Document</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Python Runner</title>
+    <!-- PyScript CSS & JavaScript -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 0 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background: #ffffff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #2da44e;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #2c974b;
+        }
+        pre {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            min-height: 150px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        #code-display {
+            background-color: #f4f4f4;
+            color: #333;
+            border: 1px solid #ccc;
+        }
+    </style>
 </head>
 <body>
-  <button onclick="openBlank()">Open Page</button>
 
-  <script>
-    function openBlank() {
-      // Replace with the destination URL you want to display
-      const targetUrl = "https://example.com"; 
+<div class="container">
+    <h2>Interactive Python Script Runner</h2>
+    
+    <div class="controls">
+        <input type="file" id="file-input" accept=".py" />
+        <button id="run-btn">Run Script</button>
+    </div>
 
-      const win = window.open('about:blank', '_blank');
-      if (win) {
-        win.document.write(`
-          <style>
-            body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-            iframe { width: 100%; height: 100%; border: none; }
-          </style>
-          <iframe src="${targetUrl}"></iframe>
-        `);
-      } else {
-        alert('Please allow pop-ups for this site.');
-      }
+    <h3>Script Source Code:</h3>
+    <pre id="code-display">Select a .py file above to load its code...</pre>
+
+    <h3>Console Output:</h3>
+    <pre id="output-terminal">Ready to run...</pre>
+</div>
+
+<!-- PyScript Logic -->
+<script type="mpy">
+from js import document, FileReader, window
+from pyodide.ffi import create_proxy
+import sys
+from io import StringIO
+
+file_content = ""
+
+def on_file_load(event):
+    global file_content
+    file_content = event.target.result
+    # Display loaded code in the script preview box
+    document.getElementById("code-display").innerText = file_content
+
+def handle_file_select(event):
+    file_list = document.getElementById("file-input").files
+    if file_list.length > 0:
+        reader = FileReader.new()
+        reader.onload = create_proxy(on_file_load)
+        reader.readAsText(file_list.item(0))
+
+def custom_input(prompt_msg=""):
+    """Overrides built-in input() to use browser prompt popups."""
+    result = window.prompt(prompt_msg)
+    if result is None:
+        return ""
+    return result
+
+def run_script(event):
+    global file_content
+    output_element = document.getElementById("output-terminal")
+    
+    if not file_content:
+        output_element.innerText = "Error: Please select a Python file first."
+        return
+
+    output_element.innerText = "Running...\n"
+    
+    # Redirect stdout to capture print statements
+    old_stdout = sys.stdout
+    sys.stdout = buffer = StringIO()
+
+    # Define execution scope and override input function
+    exec_scope = {
+        'input': custom_input,
+        '__name__': '__main__'
     }
-  </script>
+
+    try:
+        exec(file_content, exec_scope)
+        printed_output = buffer.getvalue()
+        if printed_output:
+            output_element.innerText = printed_output
+        else:
+            output_element.innerText = "Script executed successfully (no output)."
+    except Exception as e:
+        output_element.innerText = f"Execution Error:\n{e}"
+    finally:
+        sys.stdout = old_stdout
+
+# Event Listeners
+document.getElementById("file-input").addEventListener("change", create_proxy(handle_file_select))
+document.getElementById("run-btn").addEventListener("click", create_proxy(run_script))
+</script>
+
 </body>
 </html>
