@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Browser Python Runner</title>
-    <!-- PyScript CSS & JavaScript -->
+    <title>GitHub Python Script Runner</title>
+    <!-- PyScript CSS & JS -->
     <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
     <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
 
@@ -28,12 +28,19 @@
             gap: 10px;
             align-items: center;
         }
+        select, button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        select {
+            flex-grow: 1;
+            border: 1px solid #ccc;
+        }
         button {
-            padding: 8px 16px;
             background-color: #2da44e;
             color: white;
             border: none;
-            border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
         }
@@ -50,6 +57,7 @@
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
+            font-family: 'Courier New', Courier, monospace;
         }
         #code-display {
             background-color: #f4f4f4;
@@ -61,84 +69,143 @@
 <body>
 
 <div class="container">
-    <h2>Interactive Python Script Runner</h2>
+    <h2>GitHub Repository Script Runner</h2>
     
     <div class="controls">
-        <input type="file" id="file-input" accept=".py" />
+        <label for="script-select"><strong>Select Script:</strong></label>
+        <select id="script-select">
+            <option value="">Loading scripts from repository...</option>
+        </select>
         <button id="run-btn">Run Script</button>
     </div>
 
     <h3>Script Source Code:</h3>
-    <pre id="code-display">Select a .py file above to load its code...</pre>
+    <pre id="code-display">Select a script from the dropdown to view its code...</pre>
 
     <h3>Console Output:</h3>
     <pre id="output-terminal">Ready to run...</pre>
 </div>
 
-<!-- PyScript Logic -->
+<!-- Fetch files from GitHub REST API -->
+<script>
+    const GITHUB_USERNAME = "your-username"; 
+    const REPO_NAME = "your-repo-name";
+    const FOLDER_PATH = "scripts";
+
+    const selectElement = document.getElementById("script-select");
+    const codeDisplay = document.getElementById("code-display");
+    window.fileContent = ""; 
+
+    async function fetchScriptList() {
+        const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/contents/${FOLDER_PATH}`;
+        
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error("Could not find '/scripts' folder in repository.");
+            
+            const files = await response.json();
+            selectElement.innerHTML = '<option value="">-- Choose a script --</option>';
+
+            const pyFiles = files.filter(file => file.name.endsWith('.py'));
+
+            if (pyFiles.length === 0) {
+                selectElement.innerHTML = '<option value="">No .py files found in /scripts</option>';
+                return;
+            }
+
+            pyFiles.forEach(file => {
+                const option = document.createElement("option");
+                option.value = file.download_url; 
+                option.textContent = file.name;
+                selectElement.appendChild(option);
+            });
+        } catch (error) {
+            selectElement.innerHTML = `<option value="">Error: ${error.message}</option>`;
+        }
+    }
+
+    selectElement.addEventListener("change", async (event) => {
+        const downloadUrl = event.target.value;
+        if (!downloadUrl) {
+            codeDisplay.innerText = "Select a script from the dropdown to view its code...";
+            window.fileContent = "";
+            return;
+        }
+
+        codeDisplay.innerText = "Loading script code...";
+        try {
+            const response = await fetch(downloadUrl);
+            window.fileContent = await response.text();
+            codeDisplay.innerText = window.fileContent;
+        } catch (error) {
+            codeDisplay.innerText = `Failed to load script content: ${error.message}`;
+        }
+    });
+
+    fetchScriptList();
+</script>
+
+<!-- Python Execution and Output Redirection -->
 <script type="mpy">
-from js import document, FileReader, window
-from pyodide.ffi import create_proxy
+from js import window, document
 import sys
-from io import StringIO
+import asyncio
 
-file_content = ""
+class TerminalStream:
+    """Custom stdout class that streams text directly to the HTML terminal element."""
+    def __init__(self, element_id):
+        self.element = document.getElementById(element_id)
 
-def on_file_load(event):
-    global file_content
-    file_content = event.target.result
-    # Display loaded code in the script preview box
-    document.getElementById("code-display").innerText = file_content
+    def write(self, text):
+        self.element.innerText += text
+        # Keep scroll focused at bottom
+        self.element.scrollTop = self.element.scrollHeight
 
-def handle_file_select(event):
-    file_list = document.getElementById("file-input").files
-    if file_list.length > 0:
-        reader = FileReader.new()
-        reader.onload = create_proxy(on_file_load)
-        reader.readAsText(file_list.item(0))
+    def flush(self):
+        pass
 
 def custom_input(prompt_msg=""):
-    """Overrides built-in input() to use browser prompt popups."""
+    """Handles standard input using a browser popup."""
     result = window.prompt(prompt_msg)
+    # Write user input back to the terminal so it appears in log
+    document.getElementById("output-terminal").innerText += f"{prompt_msg}{result or ''}\n"
     if result is None:
         return ""
     return result
 
-def run_script(event):
-    global file_content
+async def run_script_async(event):
     output_element = document.getElementById("output-terminal")
+    script_code = window.fileContent
     
-    if not file_content:
-        output_element.innerText = "Error: Please select a Python file first."
+    if not script_code:
+        output_element.innerText = "Error: Please select a script from the dropdown first."
         return
 
-    output_element.innerText = "Running...\n"
+    output_element.innerText = ""
     
-    # Redirect stdout to capture print statements
+    # Redirect standard output streams to terminal
+    term_stream = TerminalStream("output-terminal")
     old_stdout = sys.stdout
-    sys.stdout = buffer = StringIO()
+    sys.stdout = term_stream
 
-    # Define execution scope and override input function
     exec_scope = {
         'input': custom_input,
         '__name__': '__main__'
     }
 
     try:
-        exec(file_content, exec_scope)
-        printed_output = buffer.getvalue()
-        if printed_output:
-            output_element.innerText = printed_output
-        else:
-            output_element.innerText = "Script executed successfully (no output)."
+        # Patch time.sleep with asyncio sleep inside execution scope for non-blocking delays
+        time_patch = "import time, asyncio\ntime.sleep = lambda secs: asyncio.sleep(secs)\n"
+        exec(time_patch + script_code, exec_scope)
     except Exception as e:
-        output_element.innerText = f"Execution Error:\n{e}"
+        output_element.innerText += f"\nExecution Error:\n{e}"
     finally:
         sys.stdout = old_stdout
 
-# Event Listeners
-document.getElementById("file-input").addEventListener("change", create_proxy(handle_file_select))
-document.getElementById("run-btn").addEventListener("click", create_proxy(run_script))
+def on_run_click(event):
+    asyncio.create_task(run_script_async(event))
+
+document.getElementById("run-btn").addEventListener("click", on_run_click)
 </script>
 
 </body>
