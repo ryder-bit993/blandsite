@@ -42,19 +42,44 @@
             font-weight: bold;
         }
         button:hover { background-color: #2c974b; }
-        pre {
+        .terminal-container {
             background-color: #1e1e1e;
-            color: #d4d4d4;
-            padding: 15px;
             border-radius: 6px;
-            min-height: 150px;
-            max-height: 400px;
+            padding: 15px;
+            min-height: 200px;
+            max-height: 450px;
+            display: flex;
+            flex-direction: column;
+        }
+        #output-terminal {
+            color: #d4d4d4;
+            flex-grow: 1;
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
             font-family: monospace;
+            margin: 0;
         }
-        #code-display { background-color: #f4f4f4; color: #333; border: 1px solid #ccc; }
+        .input-bar {
+            display: none;
+            margin-top: 10px;
+            gap: 10px;
+        }
+        .input-bar.active {
+            display: flex;
+        }
+        #terminal-input {
+            flex-grow: 1;
+            background: #2d2d2d;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        #terminal-input:focus {
+            outline: 1px solid #2da44e;
+        }
     </style>
 </head>
 <body>
@@ -70,21 +95,23 @@
         <button id="run-btn">Run Script</button>
     </div>
 
-    <h3>Script Source Code:</h3>
-    <pre id="code-display">Select a script from the dropdown to view its code...</pre>
-
     <h3>Console Output:</h3>
-    <pre id="output-terminal">Ready to run...</pre>
+    <div class="terminal-container">
+        <pre id="output-terminal">Ready to run...</pre>
+        <div id="input-bar" class="input-bar">
+            <input type="text" id="terminal-input" placeholder="Type your response here and press Enter..." />
+            <button id="input-submit-btn">Send</button>
+        </div>
+    </div>
 </div>
 
-<!-- Fetch files from GitHub REST API -->
+<!-- Fetch file list from GitHub REST API -->
 <script>
     const GITHUB_USERNAME = "ryder-bit993"; 
     const REPO_NAME = "blandsite";
     const FOLDER_PATH = "scripts";
 
     const selectElement = document.getElementById("script-select");
-    const codeDisplay = document.getElementById("code-display");
     window.fileContent = ""; 
 
     async function fetchScriptList() {
@@ -118,27 +145,25 @@
     selectElement.addEventListener("change", async (event) => {
         const downloadUrl = event.target.value;
         if (!downloadUrl) {
-            codeDisplay.innerText = "Select a script from the dropdown to view its code...";
             window.fileContent = "";
             return;
         }
 
-        codeDisplay.innerText = "Loading script code...";
         try {
             const response = await fetch(downloadUrl);
             window.fileContent = await response.text();
-            codeDisplay.innerText = window.fileContent;
         } catch (error) {
-            codeDisplay.innerText = `Failed to load script content: ${error.message}`;
+            document.getElementById("output-terminal").innerText = `Failed to load script content: ${error.message}`;
         }
     });
 
     fetchScriptList();
 </script>
 
-<!-- PyScript Execution -->
+<!-- PyScript Execution with In-Terminal Input Support -->
 <script type="mpy">
 from js import window, document
+import asyncio
 
 def write_to_terminal(text):
     term = document.getElementById("output-terminal")
@@ -157,17 +182,40 @@ class MockSys:
     def exit(self, code=0):
         write_to_terminal("\n[Script ended]")
 
+async def custom_input_async(prompt_msg=""):
+    write_to_terminal(prompt_msg)
+    
+    input_bar = document.getElementById("input-bar")
+    input_field = document.getElementById("terminal-input")
+    submit_btn = document.getElementById("input-submit-btn")
+    
+    input_bar.classList.add("active")
+    input_field.focus()
+    input_field.value = ""
+
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+
+    def handle_submit(event=None):
+        if event and hasattr(event, "key") and event.key != "Enter":
+            return
+        user_val = input_field.value
+        input_bar.classList.remove("active")
+        write_to_terminal(f"{user_val}\n")
+        if not future.done():
+            future.set_result(user_val)
+
+    submit_btn.onclick = handle_submit
+    input_field.onkeyup = handle_submit
+
+    result = await future
+    return result
+
 def custom_print(*args, sep=' ', end='\n'):
     output = sep.join(map(str, args)) + end
     write_to_terminal(output)
 
-def custom_input(prompt_msg=""):
-    write_to_terminal(prompt_msg)
-    result = window.prompt(prompt_msg)
-    write_to_terminal(f"{result or ''}\n")
-    return result if result is not None else ""
-
-def run_script(event):
+async def run_script_async(event):
     output_element = document.getElementById("output-terminal")
     script_code = window.fileContent
     
@@ -176,22 +224,29 @@ def run_script(event):
         return
 
     output_element.innerText = ""
-
     mock_sys = MockSys()
 
     exec_scope = {
         'sys': mock_sys,
         'print': custom_print,
-        'input': custom_input,
+        'input': custom_input_async,
         '__name__': '__main__'
     }
 
     try:
-        exec(script_code, exec_scope)
+        # Transform standard sync input calls into async await for the terminal UI
+        modified_code = script_code.replace("input(", "await input(")
+        async_wrapper = f"async def __main_async__():\n" + "\n".join(["    " + line for line in modified_code.splitlines()]) + "\n"
+        
+        exec(async_wrapper, exec_scope)
+        await exec_scope['__main_async__']()
     except Exception as e:
         output_element.innerText += f"\nExecution Error:\n{e}"
 
-document.getElementById("run-btn").addEventListener("click", run_script)
+def on_run_click(event):
+    asyncio.create_task(run_script_async(event))
+
+document.getElementById("run-btn").addEventListener("click", on_run_click)
 </script>
 
 </body>
